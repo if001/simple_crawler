@@ -45,7 +45,6 @@ class ListRequest(BaseModel):
     language: Optional[str] = Field(
         default=None, description="Language hint (engine-dependent)"
     )
-    time_range: TimeRange = Field(default=TimeRange.ANY, description="any/d/w/m/y")
 
 
 class PageRequest(BaseModel):

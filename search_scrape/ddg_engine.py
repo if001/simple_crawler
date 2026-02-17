@@ -73,8 +73,25 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
             snippet_elem = result.select_one(".result__snippet")
             snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
 
+            published_date = None
+            extras_url_div = soup.find("div", class_="result__extras__url")
+            if extras_url_div:
+                spans = extras_url_div.find_all("span")
+                for span in spans:
+                    text = span.get_text(strip=True)
+                    if "20" in text and "-" in text:
+                        published_date = text
+
             if url and title:
-                raw.append(SearchResult(rank=i, title=title, url=url, snippet=snippet))
+                raw.append(
+                    SearchResult(
+                        rank=i,
+                        title=title,
+                        url=url,
+                        snippet=snippet,
+                        published_date=published_date,
+                    )
+                )
             if len(raw) >= query.k * 3:
                 # 後段で正規化/重複除去で減るので多めに取る
                 break

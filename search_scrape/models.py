@@ -33,6 +33,7 @@ class SearchResult:
     title: str
     url: str
     snippet: Optional[str] = None
+    published_date: Optional[str] = None
 
 
 @dataclass(frozen=True)
