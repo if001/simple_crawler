@@ -14,6 +14,12 @@ from search_scrape.concurrency import ConcurrencyConfig
 from search_scrape.cache import NegativeCacheConfig
 from search_scrape.models import SearchQuery, SearchOptions, TimeRange
 
+from logging import getLogger, basicConfig, INFO, WARNING
+
+basicConfig(level=WARNING, format="[%(levelname)s](%(name)s): %(message)s", force=True)
+logger = getLogger("search_scrape.main")
+getLogger("search_scrape").setLevel(INFO)
+
 
 async def main():
     async with httpx.AsyncClient() as client:

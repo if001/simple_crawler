@@ -98,7 +98,7 @@ def is_localhost(host: str) -> bool:
 @dataclass(frozen=True)
 class UrlSafetyPolicy:
     allowed_schemes: Tuple[str, ...] = ("http", "https")
-    max_redirects: int = 5
+    # max_redirects: int = 5
     block_private_ips: bool = True
     block_link_local: bool = True
     block_loopback: bool = True

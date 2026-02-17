@@ -7,6 +7,10 @@ from .interfaces import SearchEngine
 from .models import SearchQuery, SearchResult, TimeRange
 from .url_utils import normalize_url, dedupe_urls
 
+from logging import getLogger, basicConfig, INFO, WARNING, DEBUG
+
+logger = getLogger(__name__)
+
 
 class DuckDuckGoHtmlSearchEngine(SearchEngine):
     """
@@ -16,6 +20,7 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
 
     def __init__(self, client: httpx.AsyncClient) -> None:
         self._client = client
+        logger.info("info!")
 
     async def search(self, query: SearchQuery) -> Sequence[SearchResult]:
         params = {"q": query.q, "kl": query.options.region or "jp-jp"}
@@ -26,25 +31,47 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
         # DDGに確実に効かせる保証はしない（必要ならエンジン別に対応を拡張）。
 
         r = await self._client.get(
-            "https://duckduckgo.com/html/",
+            "https://html.duckduckgo.com/html/",
             params=params,
-            headers={"User-Agent": "Mozilla/5.0"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+                "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+                "Accept-Encoding": "gzip, deflate, br",
+                "Connection": "keep-alive",
+                "Upgrade-Insecure-Requests": "1",
+            },
             timeout=15.0,
         )
-        r.raise_for_status()
-
+        # r.raise_for_status()
         soup = BeautifulSoup(r.text, "html.parser")
         raw: list[SearchResult] = []
+        if not soup:
+            logger.warning("soup not found")
+            return []
 
-        for i, a in enumerate(soup.select("a.result__a"), start=1):
-            url = a.get("href") or ""
-            title = a.get_text(strip=True) or ""
-            snippet = None
-            body = a.find_parent("div", class_="result__body")
-            if body:
-                sn = body.select_one(".result__snippet")
-                if sn:
-                    snippet = sn.get_text(" ", strip=True)
+        for i, result in enumerate(soup.select(".result"), start=1):
+            title_elem = result.select_one(".result__title")
+            if not title_elem:
+                continue
+
+            link_elem = title_elem.find("a")
+            if not link_elem:
+                continue
+
+            title = link_elem.get_text(strip=True)
+            url = link_elem.get("href", "")
+
+            # Skip ad results
+            if "y.js" in url:
+                continue
+
+            # Clean up DuckDuckGo redirect URLs
+            if url.startswith("//duckduckgo.com/l/?uddg="):
+                url = urllib.parse.unquote(link.split("uddg=")[1].split("&")[0])
+
+            snippet_elem = result.select_one(".result__snippet")
+            snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
 
             if url and title:
                 raw.append(SearchResult(rank=i, title=title, url=url, snippet=snippet))
@@ -52,6 +79,23 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
                 # 後段で正規化/重複除去で減るので多めに取る
                 break
 
+        # for i, a in enumerate(soup.select("a.result__a"), start=1):
+        #     url = a.get("href") or ""
+        #     logger.info("debug!!!!", url)
+        #     title = a.get_text(strip=True) or ""
+        #     snippet = None
+        #     body = a.find_parent("div", class_="result__body")
+        #     if body:
+        #         sn = body.select_one(".result__snippet")
+        #         if sn:
+        #             snippet = sn.get_text(" ", strip=True)
+        #
+        #     if url and title:
+        #         raw.append(SearchResult(rank=i, title=title, url=url, snippet=snippet))
+        #     if len(raw) >= query.k * 3:
+        #         # 後段で正規化/重複除去で減るので多めに取る
+        #         break
+        logger.info(f"Successfully found {len(raw)} raws")
         # 正規化 + 重複除去（検索品質）
         normalized_urls = [normalize_url(x.url) for x in raw if x.url]
         normalized_urls = [u for u in normalized_urls if u.startswith("http")]

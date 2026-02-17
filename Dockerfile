@@ -25,9 +25,9 @@ RUN uv sync --no-dev
 RUN uv run playwright install --with-deps chromium
 
 # Copy app
-COPY main.py /app/main.py
+COPY server.py /app/server.py
 COPY search_scrape /app/search_scrape
 
 EXPOSE 8000
 
-CMD ["uv", "run", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

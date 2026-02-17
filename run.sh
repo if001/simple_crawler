@@ -1,4 +1,4 @@
-docker run --rm -p 8000:8000 \
+docker run -d --rm -p 8000:8000 \
   -e GLOBAL_CONCURRENCY=8 \
   -e PER_DOMAIN_CONCURRENCY=2 \
   -e NEG_CACHE_DIR=/app/.negcache \
