@@ -8,7 +8,7 @@ from typing import Optional
 
 import httpx
 
-from .interfaces import PageFetcher
+from .interfaces import HybridPageFetcher, PageFetcher
 from .models import PageFetchResult
 from .url_utils import (
     UrlSafetyPolicy,
@@ -191,7 +191,7 @@ class BrowserPageFetcher(PageFetcher):
         )
 
 
-class HybridFetcher(PageFetcher):
+class HybridFetcher(HybridPageFetcher):
     def __init__(
         self,
         http_fetcher: HttpxPageFetcher,

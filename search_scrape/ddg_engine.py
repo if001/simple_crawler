@@ -68,7 +68,7 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
 
             # Clean up DuckDuckGo redirect URLs
             if url.startswith("//duckduckgo.com/l/?uddg="):
-                url = urllib.parse.unquote(link.split("uddg=")[1].split("&")[0])
+                url = urllib.parse.unquote(url.split("uddg=")[1].split("&")[0])
 
             snippet_elem = result.select_one(".result__snippet")
             snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
@@ -79,22 +79,6 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
                 # 後段で正規化/重複除去で減るので多めに取る
                 break
 
-        # for i, a in enumerate(soup.select("a.result__a"), start=1):
-        #     url = a.get("href") or ""
-        #     logger.info("debug!!!!", url)
-        #     title = a.get_text(strip=True) or ""
-        #     snippet = None
-        #     body = a.find_parent("div", class_="result__body")
-        #     if body:
-        #         sn = body.select_one(".result__snippet")
-        #         if sn:
-        #             snippet = sn.get_text(" ", strip=True)
-        #
-        #     if url and title:
-        #         raw.append(SearchResult(rank=i, title=title, url=url, snippet=snippet))
-        #     if len(raw) >= query.k * 3:
-        #         # 後段で正規化/重複除去で減るので多めに取る
-        #         break
         logger.info(f"Successfully found {len(raw)} raws")
         # 正規化 + 重複除去（検索品質）
         normalized_urls = [normalize_url(x.url) for x in raw if x.url]

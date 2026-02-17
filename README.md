@@ -1,8 +1,3 @@
-以下は、今回の構成・方針に合わせた **シンプルで実用的な README.md** です。
-そのまま `project_root/README.md` として配置できます。
-
----
-
 # search-scrape-server
 
 DuckDuckGo を用いて検索し、取得したページの本文を Markdown として返すシンプルなスクレイプサーバーです。
@@ -187,3 +182,12 @@ server
 ```
 
 TTL 経過後は再アクセス可能になります。
+
+
+
+server.pyでは、/searchエンドポイントが存在します。
+queryで検索し、取得したlistに対して、各ページの内容をfetchしmarkdownのlistで返す実装です。
+
+/listエンドポイントを追加してください。
+/searchのうち、listを取得する機能のみのものを取り出したものです。
+url, title, snippet

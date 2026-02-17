@@ -18,7 +18,13 @@ from search_scrape.extractor import SimpleHtmlCleaner, MarkdownifyConverter
 from search_scrape.pipeline import SearchScrapePipeline, PipelineConfig
 from search_scrape.concurrency import ConcurrencyConfig
 from search_scrape.cache import NegativeCacheConfig
-from search_scrape.models import SearchQuery, SearchOptions, TimeRange, MarkdownDocument
+from search_scrape.models import (
+    SearchQuery,
+    SearchOptions,
+    SearchResult,
+    TimeRange,
+    MarkdownDocument,
+)
 from logging import getLogger, basicConfig, INFO, WARNING
 
 basicConfig(level=WARNING, format="[%(levelname)s](%(name)s): %(message)s", force=True)
@@ -29,6 +35,21 @@ getLogger("search_scrape").setLevel(INFO)
 # -----------------------
 # Request / Response
 # -----------------------
+
+
+class ListRequest(BaseModel):
+    q: str = Field(..., min_length=1)
+    k: int = Field(5, ge=1, le=50)
+
+    region: Optional[str] = Field(default="jp-jp", description="DuckDuckGo region (kl)")
+    language: Optional[str] = Field(
+        default=None, description="Language hint (engine-dependent)"
+    )
+    time_range: TimeRange = Field(default=TimeRange.ANY, description="any/d/w/m/y")
+
+
+class PageRequest(BaseModel):
+    urls: str = Field(..., min_length=1)
 
 
 class SearchRequest(BaseModel):
@@ -58,6 +79,16 @@ class SearchResponse(BaseModel):
     query: str
     k: int
     docs: List[DocOut]
+
+
+class PageResponse(BaseModel):
+    docs: List[DocOut]
+
+
+class ListResponse(BaseModel):
+    query: str
+    k: int
+    results: List[SearchResult]
 
 
 # -----------------------
@@ -136,6 +167,62 @@ async def shutdown() -> None:
         _http_client = None
 
 
+@app.post("/list", response_model=ListResponse)
+async def list(req: ListRequest) -> ListResponse:
+    assert _pipeline is not None
+    assert _http_client is not None
+    engine = DuckDuckGoHtmlSearchEngine(_http_client)
+
+    query = SearchQuery(
+        q=req.q,
+        k=10,
+        options=SearchOptions(
+            region=req.region,
+            language=req.language,
+            time_range=req.time_range,
+        ),
+    )
+    results = await engine.search(query)
+    return ListResponse(k=10, query=req.q, results=[v for v in results])
+
+
+@app.post("/page", response_model=PageResponse)
+async def page(req: PageRequest) -> PageResponse:
+    assert _pipeline is not None
+    assert _http_client is not None
+
+    urls = [req.urls]
+    if "," in req.urls:
+        urls = req.urls.split(",")
+
+    engine = DuckDuckGoHtmlSearchEngine(_http_client)
+    fetch_policy = FetchPolicy(
+        timeout_s=float(os.getenv("FETCH_TIMEOUT_S", "20.0")),
+        require_html=True,
+        min_html_chars=_env_int("MIN_HTML_CHARS", 2000),
+    )
+    http_fetcher = HttpxPageFetcher(_http_client, policy=fetch_policy)
+    hybrid_fetcher = HybridFetcher(http_fetcher, browser_fetcher=None)
+
+    pipeline = SearchScrapePipeline(
+        engine=engine,
+        fetcher=hybrid_fetcher,
+        cleaner=SimpleHtmlCleaner(),
+        converter=MarkdownifyConverter(),
+        config=_pipeline._cfg,  # 既存設定を流用（軽量）
+        post_processor=None,
+    )
+
+    docs = []
+    for url in urls:
+        result = await pipeline.fetch_one(url)
+        if result:
+            docs.append(result)
+    return PageResponse(
+        docs=[DocOut(url=d.url, title=d.title, markdown=d.markdown) for d in docs],
+    )
+
+
 @app.post("/search", response_model=SearchResponse)
 async def search(req: SearchRequest) -> SearchResponse:
     """
@@ -182,7 +269,7 @@ async def search(req: SearchRequest) -> SearchResponse:
         ),
     )
 
-    docs: list[MarkdownDocument] = await pipeline.run(query)
+    docs: List[MarkdownDocument] = await pipeline.run(query)
 
     return SearchResponse(
         query=req.q,

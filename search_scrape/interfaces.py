@@ -11,6 +11,11 @@ class PageFetcher(Protocol):
     async def fetch(self, url: str) -> PageFetchResult: ...
 
 
+class HybridPageFetcher(Protocol):
+    async def fetch_http(self, url: str) -> PageFetchResult: ...
+    async def fetch_browser(self, url: str) -> PageFetchResult: ...
+
+
 class HtmlCleaner(Protocol):
     def clean(self, html: str) -> tuple[str, str]:
         """return (title, cleaned_html_fragment)"""
