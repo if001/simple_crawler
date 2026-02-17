@@ -63,10 +63,11 @@ class SearchScrapePipeline:
         self._bot = HttpBotDetector(config.bot_detection)
 
     async def _fetch_by_browser(self, url: str):
-        logger.info(f"run browser: {url}")
+        logger.info(f"browser fetch: {url}")
         page = await self._fetcher.fetch_browser(url)
         # browserでも200以外ならキャッシュ
         if page.status_code != 200:
+            logger.warning("browser not 200: {page.status_code}")
             self._neg_cache.put(
                 url,
                 page.status_code,
@@ -75,11 +76,13 @@ class SearchScrapePipeline:
             return None
         ct2 = (page.content_type or "").lower()
         if ct2 and "text/html" not in ct2:
+            logger.warning("browser non html")
             self._neg_cache.put(url, page.status_code, f"browser_non_html:{ct2}")
             return None
         # browser結果もbot判定（HTTP段階ルールだがHTML本文は見れる）
         bot2 = self._bot.detect(page)
         if bot2 is not None:
+            logger.warning("browser bot: {bot2}")
             self._neg_cache.put(
                 url,
                 403 if page.status_code == 200 else page.status_code,
@@ -140,6 +143,8 @@ class SearchScrapePipeline:
                 logger.warning("not cleaned html")
                 return None
 
+            logger.info(f"fetch {url}")
+            ## browser fetch
             md_text = (self._converter.convert(cleaned_html) or "").strip()
             if len(md_text) < self._cfg.min_markdown_chars:
                 logger.warning(
