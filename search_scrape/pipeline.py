@@ -62,6 +62,32 @@ class SearchScrapePipeline:
         self._neg_cache = NegativeCacheStore(config.negative_cache)
         self._bot = HttpBotDetector(config.bot_detection)
 
+    async def _fetch_by_browser(self, url: str):
+        logger.info(f"run browser: {url}")
+        page = await self._fetcher.fetch_browser(url)
+        # browserでも200以外ならキャッシュ
+        if page.status_code != 200:
+            self._neg_cache.put(
+                url,
+                page.status_code,
+                f"browser_non_200:{page.status_code}",
+            )
+            return None
+        ct2 = (page.content_type or "").lower()
+        if ct2 and "text/html" not in ct2:
+            self._neg_cache.put(url, page.status_code, f"browser_non_html:{ct2}")
+            return None
+        # browser結果もbot判定（HTTP段階ルールだがHTML本文は見れる）
+        bot2 = self._bot.detect(page)
+        if bot2 is not None:
+            self._neg_cache.put(
+                url,
+                403 if page.status_code == 200 else page.status_code,
+                f"bot:{bot2}",
+            )
+            return None
+        return page
+
     async def fetch_one(self, url: str) -> Optional[MarkdownDocument]:
         # 1) negative cache チェック（再アクセスしない）
         if self._neg_cache.get(url) is not None:
@@ -103,32 +129,7 @@ class SearchScrapePipeline:
             # 6) 本文抽出前の “薄いHTML” なら browser昇格（可能なら）
             if len(page.html or "") < self._cfg.min_html_chars_for_browser_escalation:
                 try:
-                    logger.info(f"run browser: {url}")
-                    page2 = await self._fetcher.fetch_browser(url)
-                    # browserでも200以外ならキャッシュ
-                    if page2.status_code != 200:
-                        self._neg_cache.put(
-                            url,
-                            page2.status_code,
-                            f"browser_non_200:{page2.status_code}",
-                        )
-                        return None
-                    ct2 = (page2.content_type or "").lower()
-                    if ct2 and "text/html" not in ct2:
-                        self._neg_cache.put(
-                            url, page2.status_code, f"browser_non_html:{ct2}"
-                        )
-                        return None
-                    # browser結果もbot判定（HTTP段階ルールだがHTML本文は見れる）
-                    bot2 = self._bot.detect(page2)
-                    if bot2 is not None:
-                        self._neg_cache.put(
-                            url,
-                            403 if page2.status_code == 200 else page2.status_code,
-                            f"bot:{bot2}",
-                        )
-                        return None
-                    page = page2
+                    page = await self._fetch_by_browser(url)
                 except Exception as e:
                     logger.error("browser error: {e}")
                     pass
@@ -144,7 +145,12 @@ class SearchScrapePipeline:
                 logger.warning(
                     f"md min chars {len(md_text)} < {self._cfg.min_markdown_chars}"
                 )
-                return None
+                page = await self._fetch_by_browser(url)
+                title, cleaned_html = self._cleaner.clean(page.html)
+                if not cleaned_html:
+                    logger.warning("not cleaned html")
+                    return None
+                md_text = (self._converter.convert(cleaned_html) or "").strip()
 
             return MarkdownDocument(
                 url=page.final_url,

@@ -20,7 +20,6 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
 
     def __init__(self, client: httpx.AsyncClient) -> None:
         self._client = client
-        logger.info("info!")
 
     async def search(self, query: SearchQuery) -> Sequence[SearchResult]:
         params = {"q": query.q, "kl": query.options.region or "jp-jp"}
@@ -74,12 +73,12 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
             snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
 
             published_date = None
-            extras_url_div = soup.find("div", class_="result__extras__url")
+            extras_url_div = result.find("div", class_="result__extras__url")
             if extras_url_div:
                 spans = extras_url_div.find_all("span")
                 for span in spans:
                     text = span.get_text(strip=True)
-                    if "20" in text and "-" in text:
+                    if "20" in text:
                         published_date = text
 
             if url and title:
@@ -115,7 +114,11 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
             if base:
                 out.append(
                     SearchResult(
-                        rank=rank, title=base.title, url=u, snippet=base.snippet
+                        rank=rank,
+                        title=base.title,
+                        url=u,
+                        snippet=base.snippet,
+                        published_date=base.published_date,
                     )
                 )
             else:

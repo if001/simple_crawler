@@ -45,6 +45,7 @@ class ListRequest(BaseModel):
     language: Optional[str] = Field(
         default=None, description="Language hint (engine-dependent)"
     )
+    time_range: TimeRange = Field(default=TimeRange.ANY, description="any/d/w/m/y")
 
 
 class PageRequest(BaseModel):
@@ -194,24 +195,7 @@ async def page(req: PageRequest) -> PageResponse:
     if "," in req.urls:
         urls = req.urls.split(",")
 
-    engine = DuckDuckGoHtmlSearchEngine(_http_client)
-    fetch_policy = FetchPolicy(
-        timeout_s=float(os.getenv("FETCH_TIMEOUT_S", "20.0")),
-        require_html=True,
-        min_html_chars=_env_int("MIN_HTML_CHARS", 2000),
-    )
-    http_fetcher = HttpxPageFetcher(_http_client, policy=fetch_policy)
-    hybrid_fetcher = HybridFetcher(http_fetcher, browser_fetcher=None)
-
-    pipeline = SearchScrapePipeline(
-        engine=engine,
-        fetcher=hybrid_fetcher,
-        cleaner=SimpleHtmlCleaner(),
-        converter=MarkdownifyConverter(),
-        config=_pipeline._cfg,  # 既存設定を流用（軽量）
-        post_processor=None,
-    )
-
+    pipeline = _pipeline
     docs = []
     for url in urls:
         result = await pipeline.fetch_one(url)

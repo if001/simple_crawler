@@ -19,7 +19,9 @@ _NOISE_SELECTORS = [
     "[class*='comment']",
     # 広告っぽいもの
     "[id*='ad']",
-    "[class*='ad']",
+    "[class*='-ad']",
+    "[class*='ad-']",
+    "[class*='-ad-']",
     "[class*='ads']",
     "[id*='ads']",
     "[class*='banner']",
