@@ -50,3 +50,9 @@ class MarkdownDocument:
     url: str
     title: str
     markdown: str
+
+
+@dataclass
+class ErrorType:
+    status: int
+    message: str

@@ -4,7 +4,7 @@ import os
 from typing import Optional, List
 
 import httpx
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from search_scrape.ddg_engine import DuckDuckGoHtmlSearchEngine
@@ -24,6 +24,7 @@ from search_scrape.models import (
     SearchResult,
     TimeRange,
     MarkdownDocument,
+    ErrorType,
 )
 from logging import getLogger, basicConfig, INFO, WARNING
 
@@ -197,10 +198,19 @@ async def page(req: PageRequest) -> PageResponse:
 
     pipeline = _pipeline
     docs = []
+    errors = []
     for url in urls:
         result = await pipeline.fetch_one(url)
-        if result:
+        if isinstance(result, ErrorType):
+            # raise HTTPException(status_code=result.status_code, detail=result.message)
+            errors.append(result)
+            logger.error(f"{result.message}")
+        else:
             docs.append(result)
+
+    if not result:
+        msg = "\n".join([v.message for v in errors])
+        raise HTTPException(status_code=500, detail=msg)
     return PageResponse(
         docs=[DocOut(url=d.url, title=d.title, markdown=d.markdown) for d in docs],
     )
@@ -252,8 +262,11 @@ async def search(req: SearchRequest) -> SearchResponse:
         ),
     )
 
-    docs: List[MarkdownDocument] = await pipeline.run(query)
-
+    result, errors = await pipeline.run(query)
+    if not result:
+        msg = "\n".join([v.message for v in errors])
+        raise HTTPException(status_code=500, detail=msg)
+    docs: List[MarkdownDocument] = result
     return SearchResponse(
         query=req.q,
         k=req.k,

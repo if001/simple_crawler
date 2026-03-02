@@ -9,7 +9,7 @@ from .interfaces import (
     HtmlToMarkdownConverter,
     DocumentPostProcessor,
 )
-from .models import MarkdownDocument, SearchQuery
+from .models import MarkdownDocument, SearchQuery, ErrorType
 from .url_utils import normalize_url, dedupe_urls
 
 from .concurrency import ConcurrencyConfig, DomainLimiter
@@ -62,7 +62,7 @@ class SearchScrapePipeline:
         self._neg_cache = NegativeCacheStore(config.negative_cache)
         self._bot = HttpBotDetector(config.bot_detection)
 
-    async def _fetch_by_browser(self, url: str):
+    async def _fetch_by_browser(self, url: str) -> MarkdownDocument | ErrorType:
         logger.info(f"browser fetch: {url}")
         page = await self._fetcher.fetch_browser(url)
         # browserでも200以外ならキャッシュ
@@ -73,12 +73,17 @@ class SearchScrapePipeline:
                 page.status_code,
                 f"browser_non_200:{page.status_code}",
             )
-            return None
+            if 400 <= page.status_code < 500:
+                return ErrorType(status=page.status_code, message="bad request")
+            else:
+                return ErrorType(status=500, message="server error")
+
         ct2 = (page.content_type or "").lower()
         if ct2 and "text/html" not in ct2:
             logger.warning("browser non html")
             self._neg_cache.put(url, page.status_code, f"browser_non_html:{ct2}")
-            return None
+            return ErrorType(status=500, message="negative cache")
+
         # browser結果もbot判定（HTTP段階ルールだがHTML本文は見れる）
         bot2 = self._bot.detect(page)
         if bot2 is not None:
@@ -88,14 +93,17 @@ class SearchScrapePipeline:
                 403 if page.status_code == 200 else page.status_code,
                 f"bot:{bot2}",
             )
-            return None
+            return ErrorType(
+                status=500,
+                message=f"negative cache. may be bot detect. reason: {bot_reason}",
+            )
         return page
 
-    async def fetch_one(self, url: str) -> Optional[MarkdownDocument]:
+    async def fetch_one(self, url: str) -> MarkdownDocument | ErrorType:
         # 1) negative cache チェック（再アクセスしない）
         if self._neg_cache.get(url) is not None:
             logger.warning(f"negative cache: {url}")
-            return None
+            return ErrorType(status=500, message="negative cache")
 
         await self._limiter.acquire(url)
         try:
@@ -108,31 +116,40 @@ class SearchScrapePipeline:
                 self._neg_cache.put(
                     url, page.status_code, f"non_200:{page.status_code}"
                 )
-                return None
+                if 400 <= page.status_code < 500:
+                    return ErrorType(status=page.status_code, message="bad request")
+                else:
+                    return ErrorType(status=500, message="server error")
 
             # 4) content-typeでHTML以外を除外（テキストのみ）
             ct = (page.content_type or "").lower()
             if "text/html" not in ct:
                 logger.warning("content type not text/html")
                 self._neg_cache.put(url, page.status_code, f"non_html:{ct}")
-                return None
+                return ErrorType(status=500, message="negative cache")
 
             # 5) bot/challenge判定（HTTP段階）
             bot_reason = self._bot.detect(page)
             if bot_reason is not None:
                 logger.warning(f"bot detect: {url}")
-                # bot扱いで “しばらく触らない”
-                self._neg_cache.put(
-                    url,
-                    403 if page.status_code == 200 else page.status_code,
-                    f"bot:{bot_reason}",
-                )
-                return None
+                if bot_reason != "challenge_page_200":
+                    # bot扱いで “しばらく触らない”
+                    self._neg_cache.put(
+                        url,
+                        403 if page.status_code == 200 else page.status_code,
+                        f"bot:{bot_reason}",
+                    )
+                    return ErrorType(
+                        status=500,
+                        message=f"negative cache. may be bot detect. reason: {bot_reason}",
+                    )
 
             # 6) 本文抽出前の “薄いHTML” なら browser昇格（可能なら）
             if len(page.html or "") < self._cfg.min_html_chars_for_browser_escalation:
                 try:
                     page = await self._fetch_by_browser(url)
+                    if isinstance(page, ErrorType):
+                        return page
                 except Exception as e:
                     logger.error("browser error: {e}")
                     pass
@@ -141,7 +158,7 @@ class SearchScrapePipeline:
             title, cleaned_html = self._cleaner.clean(page.html)
             if not cleaned_html:
                 logger.warning("not cleaned html")
-                return None
+                return ErrorType(status=500, message="extract markdown error")
 
             logger.info(f"fetch {url}")
             ## browser fetch
@@ -151,10 +168,13 @@ class SearchScrapePipeline:
                     f"md min chars {len(md_text)} < {self._cfg.min_markdown_chars}"
                 )
                 page = await self._fetch_by_browser(url)
+                if isinstance(page, ErrorType):
+                    return page
+
                 title, cleaned_html = self._cleaner.clean(page.html)
                 if not cleaned_html:
                     logger.warning("not cleaned html")
-                    return None
+                    return ErrorType(status=500, message="extract markdown error")
                 md_text = (self._converter.convert(cleaned_html) or "").strip()
 
             return MarkdownDocument(
@@ -168,11 +188,13 @@ class SearchScrapePipeline:
             # status_codeは擬似的に 0 とする
             logger.error(e)
             self._neg_cache.put(url, 0, f"exception:{type(e).__name__}")
-            return None
+            return ErrorType(status=500, message="internal server error")
         finally:
             await self._limiter.release(url)
 
-    async def run(self, query: SearchQuery) -> list[MarkdownDocument]:
+    async def run(
+        self, query: SearchQuery
+    ) -> tuple[list[MarkdownDocument], list[ErrorType]]:
         results = await self._engine.search(query)
 
         urls = [normalize_url(r.url) for r in results]
@@ -180,9 +202,16 @@ class SearchScrapePipeline:
         urls = dedupe_urls(urls)
 
         docs = await asyncio.gather(*[self.fetch_one(u) for u in urls])
-        out = [d for d in docs if d is not None]
 
-        if self._post:
-            out = await self._post.process(out)
-
-        return out
+        ok_list = []
+        error_list = []
+        for d in docs:
+            if isinstance(d, ErrorType):
+                error_list.append(d)
+            else:
+                if self._post:
+                    out = await self._post.process(out)
+                else:
+                    out = d
+                ok_list.append(out)
+        return ok_list, error_list
