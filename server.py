@@ -176,7 +176,7 @@ async def list(req: ListRequest) -> ListResponse:
 
     query = SearchQuery(
         q=req.q,
-        k=10,
+        k=req.k or 5,
         options=SearchOptions(
             region=req.region,
             language=req.language,
@@ -184,7 +184,7 @@ async def list(req: ListRequest) -> ListResponse:
         ),
     )
     results = await engine.search(query)
-    return ListResponse(k=10, query=req.q, results=[v for v in results])
+    return ListResponse(k=req.k, query=req.q, results=[v for v in results])
 
 
 @app.post("/page", response_model=PageResponse)
@@ -254,7 +254,7 @@ async def search(req: SearchRequest) -> SearchResponse:
 
     query = SearchQuery(
         q=req.q,
-        k=req.k,
+        k=req.k or 5,
         options=SearchOptions(
             region=req.region,
             language=req.language,

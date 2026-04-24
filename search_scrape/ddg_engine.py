@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Sequence
 import httpx
 from bs4 import BeautifulSoup
+import urllib
 
 from .interfaces import SearchEngine
 from .models import SearchQuery, SearchResult, TimeRange
@@ -33,7 +34,7 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
             "https://html.duckduckgo.com/html/",
             params=params,
             headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124",
+                "User-Agent": "Mozilla/5.0 (Windows NT 11.0; Win64; x64) AppleWebKit/605.1.15 (KHTML, like Gecko) Chrome/147.0.7727.56",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
                 "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
                 "Accept-Encoding": "gzip, deflate, br",
@@ -48,8 +49,9 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
         if not soup:
             logger.warning("soup not found")
             return []
-
-        for i, result in enumerate(soup.select(".result"), start=1):
+        raw_results = soup.select(".result")
+        logger.info(f"raw results: {len(raw_results)}")
+        for i, result in enumerate(raw_results, start=1):
             title_elem = result.select_one(".result__title")
             if not title_elem:
                 continue
@@ -109,6 +111,7 @@ class DuckDuckGoHtmlSearchEngine(SearchEngine):
                 url_to_best[nu] = item
 
         out: list[SearchResult] = []
+        print('query.k', query.k)
         for rank, u in enumerate(unique_urls[: query.k], start=1):
             base = url_to_best.get(u)
             if base:
